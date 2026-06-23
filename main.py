@@ -218,8 +218,8 @@ class CachePulsePlugin(Star):
         # last assistant reply) while satisfying API format requirements.
         msgs = list(state["messages"])
         msgs.append({"role": "user", "content":
-            "[System: cache keepalive pulse — not a real message. "
-            "Reply with exactly: 1]"
+            "[System: This is a cache keepalive message. "
+            "Reply with 1.]"
         })
 
         resp = await self.context.llm_generate(
