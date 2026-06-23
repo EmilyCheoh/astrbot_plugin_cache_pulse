@@ -207,10 +207,11 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Send a single minimal user message — the pulse only needs to
-        # hit the cached system prompt + tools prefix.  Real conversation
-        # history is unnecessary and wastes non-cached input tokens.
-        msgs = [{"role": "user", "content": "."}]
+        # Append a minimal user message so the conversation ends with
+        # a user turn — preserves the full cached prefix (including the
+        # last assistant reply) while satisfying API format requirements.
+        msgs = list(state["messages"])
+        msgs.append({"role": "user", "content": "."})
 
         resp = await self.context.llm_generate(
             chat_provider_id=provider_id,
