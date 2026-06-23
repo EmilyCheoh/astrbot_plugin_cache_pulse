@@ -1,26 +1,30 @@
 {
   "enabled": {
-    "description": "Enable Anthropic cache pulse keepalive",
+    "description": "启用 Cache Pulse",
     "type": "bool",
     "default": true
   },
   "interval_seconds": {
-    "description": "Seconds after last LLM response before sending a pulse (Anthropic cache TTL is 300s)",
+    "description": "Pulse 间隔（秒）",
+    "hint": "Seconds after last LLM response before sending a pulse (Anthropic cache TTL is 300s)",
     "type": "int",
     "default": 270
   },
   "max_tries": {
-    "description": "Max consecutive pulses without a real user message before stopping",
+    "description": "最大连续 Pulse 次数",
+    "hint": "Max consecutive pulses without a real user message before stopping",
     "type": "int",
     "default": 5
   },
   "check_interval_seconds": {
-    "description": "How often (seconds) the background loop checks sessions",
+    "description": "检查间隔（秒）",
+    "hint": "How often (seconds) the background loop checks sessions",
     "type": "int",
     "default": 5
   },
   "debug_log": {
-    "description": "Log cache pulse details to AstrBot log",
+    "description": "开启日志",
+    "hint": "Log cache pulse details to AstrBot log",
     "type": "bool",
     "default": true
   }
