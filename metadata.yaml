@@ -2,5 +2,5 @@ name: astrbot_plugin_cache_pulse
 display_name: "♻️ 自动刷新缓存"
 desc: Automatically pulses Anthropic API to refresh prompt cache when idle.
 version: v0.1.0
-author: None
+author: Felis Abyssalis
 repo: "https://github.com/EmilyCheoh/astrbot_plugin_cache_pulse"
