@@ -89,7 +89,7 @@ class CachePulsePlugin(Star):
             state["last_user_at"] = now
             state["tries"] = 0
             if self._debug():
-                logger.debug("[cache_pulse] user activity reset umo=%s", umo)
+                logger.debug("[🔄 Cache Pulse] user activity reset umo=%s", umo)
         else:
             # Skeleton entry — snapshot will be filled by on_agent_done
             self.sessions[umo] = {
@@ -113,12 +113,12 @@ class CachePulsePlugin(Star):
             provider_id = await self.context.get_current_chat_provider_id(umo)
         except Exception:
             if self._debug():
-                logger.warning("[cache_pulse] could not resolve provider for umo=%s", umo)
+                logger.warning("[🔄 Cache Pulse] could not resolve provider for umo=%s", umo)
             return
 
         if not self._is_anthropic_provider(provider_id):
             if self._debug():
-                logger.debug("[cache_pulse] skip non-Anthropic provider=%s", provider_id)
+                logger.debug("[🔄 Cache Pulse] skip non-Anthropic provider=%s", provider_id)
             return
 
         # Read exposed metadata from runner patch
@@ -132,7 +132,7 @@ class CachePulsePlugin(Star):
             messages = copy.deepcopy(run_context.messages)
         except Exception:
             if self._debug():
-                logger.warning("[cache_pulse] failed to deepcopy messages for umo=%s", umo)
+                logger.warning("[🔄 Cache Pulse] failed to deepcopy messages for umo=%s", umo)
             return
 
         now = time.monotonic()
@@ -151,8 +151,8 @@ class CachePulsePlugin(Star):
 
         if self._debug():
             logger.info(
-                "[cache_pulse] snapshot saved umo=%s provider=%s msgs=%d tools=%s model=%s",
-                umo, provider_id, len(messages), bool(tools), model,
+                "[🔄 Cache Pulse] snapshot saved, %d messages captured",
+                len(messages),
             )
 
     # ── background pulse loop ───────────────────────────────────────
@@ -175,6 +175,12 @@ class CachePulsePlugin(Star):
                     continue
                 # Respect max tries
                 if state.get("tries", 0) >= self._max_tries():
+                    if not state.get("_max_logged"):
+                        logger.info(
+                            "[🔄 Cache Pulse] max tries (%d) reached, pausing until next message",
+                            self._max_tries(),
+                        )
+                        state["_max_logged"] = True
                     continue
                 # Check if enough idle time has passed since last LLM activity
                 last_activity = max(
@@ -195,7 +201,7 @@ class CachePulsePlugin(Star):
                     state["last_pulse_at"] = time.monotonic()
                 except Exception as exc:
                     logger.warning(
-                        "[cache_pulse] pulse failed umo=%s err=%s",
+                        "[🔄 Cache Pulse] pulse failed umo=%s err=%s",
                         umo, exc, exc_info=True,
                     )
                     state["tries"] = state.get("tries", 0) + 1
@@ -211,7 +217,10 @@ class CachePulsePlugin(Star):
         # a user turn — preserves the full cached prefix (including the
         # last assistant reply) while satisfying API format requirements.
         msgs = list(state["messages"])
-        msgs.append({"role": "user", "content": "."})
+        msgs.append({"role": "user", "content":
+            "[System: cache keepalive pulse — not a real message. "
+            "Reply with exactly: 1]"
+        })
 
         resp = await self.context.llm_generate(
             chat_provider_id=provider_id,
@@ -225,8 +234,8 @@ class CachePulsePlugin(Star):
         if self._debug():
             usage = getattr(resp, "usage", None)
             logger.info(
-                "[cache_pulse] pulse ok umo=%s provider=%s try=%d usage=%s",
-                umo, provider_id, state.get("tries", 0) + 1, usage,
+                "[🔄 Cache Pulse] pulse ok (try %d) usage = %s",
+                state.get("tries", 0) + 1, usage,
             )
 
     # ── cleanup ─────────────────────────────────────────────────────
