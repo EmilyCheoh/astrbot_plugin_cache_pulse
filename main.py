@@ -207,16 +207,10 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Strip trailing assistant messages — some providers reject
-        # assistant prefill and require the conversation to end with
-        # a user message.
-        msgs = list(state["messages"])
-        while msgs and getattr(msgs[-1], "role", None) == "assistant":
-            msgs.pop()
-        if not msgs:
-            if self._debug():
-                logger.debug("[cache_pulse] no user messages left after trim umo=%s", umo)
-            return
+        # Send a single minimal user message — the pulse only needs to
+        # hit the cached system prompt + tools prefix.  Real conversation
+        # history is unnecessary and wastes non-cached input tokens.
+        msgs = [{"role": "user", "content": "."}]
 
         resp = await self.context.llm_generate(
             chat_provider_id=provider_id,
