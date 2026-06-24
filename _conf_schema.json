@@ -4,12 +4,6 @@
     "type": "bool",
     "default": true
   },
-  "preset_message_count": {
-    "description": "预设对话消息数量",
-    "hint": "Number of preset messages at the start of the conversation (0 = no preset, 2 = one user+assistant pair, etc.). These messages are always stable and will be preserved in pulse.",
-    "type": "int",
-    "default": 2
-  },
   "interval_seconds": {
     "description": "Pulse 间隔（秒）",
     "hint": "Seconds after last LLM response before sending a pulse (Anthropic cache TTL is 300s)",

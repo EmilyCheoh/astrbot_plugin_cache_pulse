@@ -55,9 +55,6 @@ class CachePulsePlugin(Star):
     def _debug(self) -> bool:
         return bool(self.config.get("debug_log", True))
 
-    def _preset_count(self) -> int:
-        return int(self.config.get("preset_message_count", 2))
-
     # ── provider detection ──────────────────────────────────────────
 
     def _is_anthropic_provider(self, provider_id: str) -> bool:
@@ -216,34 +213,26 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Trim to the second-to-last assistant message so the pulse
-        # only warms the *stable* prefix.  Other plugins may modify the
-        # last user message or clean the final exchange before the next
-        # real request — by excluding that volatile tail we guarantee
-        # the cached prefix matches the next real request exactly.
+        # Keep the full conversation and append three fake messages so
+        # the cache_control breakpoint (set on the second-to-last user
+        # message by the patched anthropic_source) lands on static text
+        # rather than a real user message that plugins may modify.
+        #
+        #   [...real conversation..., last_asst]
+        #     + fake_user₁  ← breakpoint lands here (second-to-last user)
+        #     + fake_asst
+        #     + fake_user₂  ← last user message (uncached, ~20 tokens)
+        #
+        # This way the entire real conversation is cached, and only
+        # fake_asst + fake_user₂ (~21 tokens) are uncached input.
         msgs = list(state["messages"])
-
-        # Walk backwards to find the second-to-last assistant message.
-        asst_indices = [
-            i for i, m in enumerate(msgs)
-            if getattr(m, "role", None) == "assistant"
-        ]
-        if len(asst_indices) >= 2:
-            # Keep everything up to and including the second-to-last
-            # assistant message — discard the final user+assistant turn.
-            msgs = msgs[: asst_indices[-2] + 1]
-        else:
-            # 0 or 1 assistant replies — only the preset messages
-            # (if any) form a stable prefix.  Keep those, discard the
-            # rest (which may contain tagged user messages).
-            preset_n = self._preset_count()
-            msgs = msgs[:preset_n] if preset_n > 0 else []
-
-        # Append a minimal user turn to satisfy API format requirements.
-        msgs.append({"role": "user", "content":
+        KEEPALIVE = (
             "[System: This is an automatic cache keepalive message. "
             "Reply with 'OK' verbatim.]"
-        })
+        )
+        msgs.append({"role": "user", "content": KEEPALIVE})
+        msgs.append({"role": "assistant", "content": "OK"})
+        msgs.append({"role": "user", "content": KEEPALIVE})
 
         resp = await self.context.llm_generate(
             chat_provider_id=provider_id,
