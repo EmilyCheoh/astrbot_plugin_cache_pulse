@@ -225,7 +225,8 @@ class CachePulsePlugin(Star):
 
         # Walk backwards to find the second-to-last assistant message.
         asst_indices = [
-            i for i, m in enumerate(msgs) if m.get("role") == "assistant"
+            i for i, m in enumerate(msgs)
+            if getattr(m, "role", None) == "assistant"
         ]
         if len(asst_indices) >= 2:
             # Keep everything up to and including the second-to-last
