@@ -55,6 +55,9 @@ class CachePulsePlugin(Star):
     def _debug(self) -> bool:
         return bool(self.config.get("debug_log", True))
 
+    def _preset_count(self) -> int:
+        return int(self.config.get("preset_message_count", 2))
+
     # ── provider detection ──────────────────────────────────────────
 
     def _is_anthropic_provider(self, provider_id: str) -> bool:
@@ -213,10 +216,29 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Append a minimal user message so the conversation ends with
-        # a user turn — preserves the full cached prefix (including the
-        # last assistant reply) while satisfying API format requirements.
+        # Trim to the second-to-last assistant message so the pulse
+        # only warms the *stable* prefix.  Other plugins may modify the
+        # last user message or clean the final exchange before the next
+        # real request — by excluding that volatile tail we guarantee
+        # the cached prefix matches the next real request exactly.
         msgs = list(state["messages"])
+
+        # Walk backwards to find the second-to-last assistant message.
+        asst_indices = [
+            i for i, m in enumerate(msgs) if m.get("role") == "assistant"
+        ]
+        if len(asst_indices) >= 2:
+            # Keep everything up to and including the second-to-last
+            # assistant message — discard the final user+assistant turn.
+            msgs = msgs[: asst_indices[-2] + 1]
+        else:
+            # 0 or 1 assistant replies — only the preset messages
+            # (if any) form a stable prefix.  Keep those, discard the
+            # rest (which may contain tagged user messages).
+            preset_n = self._preset_count()
+            msgs = msgs[:preset_n] if preset_n > 0 else []
+
+        # Append a minimal user turn to satisfy API format requirements.
         msgs.append({"role": "user", "content":
             "[System: This is an automatic cache keepalive message. "
             "Reply with 'OK' verbatim.]"
