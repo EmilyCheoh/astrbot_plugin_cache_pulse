@@ -55,6 +55,9 @@ class CachePulsePlugin(Star):
     def _debug(self) -> bool:
         return bool(self.config.get("debug_log", True))
 
+    def _preset_count(self) -> int:
+        return int(self.config.get("preset_message_count", 2))
+
     # ── provider detection ──────────────────────────────────────────
 
     def _is_anthropic_provider(self, provider_id: str) -> bool:
@@ -213,19 +216,33 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Keep the full conversation and append three fake messages so
-        # the cache_control breakpoint (set on the second-to-last user
-        # message by the patched anthropic_source) lands on static text
-        # rather than a real user message that plugins may modify.
+        # Trim to the second-to-last assistant message to discard the
+        # volatile tail (last user message may be modified by cleanup
+        # plugins that strip injected XML).  Then append three fake
+        # messages so the cache_control breakpoint (placed on the
+        # second-to-last user message by the patched anthropic_source)
+        # lands on static keepalive text rather than a real message.
         #
-        #   [...real conversation..., last_asst]
-        #     + fake_user₁  ← breakpoint lands here (second-to-last user)
+        #   [...stable prefix..., second_to_last_asst]
+        #     + fake_user₁  ← breakpoint lands here
         #     + fake_asst
-        #     + fake_user₂  ← last user message (uncached, ~20 tokens)
+        #     + fake_user₂  ← uncached (~33 tokens total with fake_asst)
         #
-        # This way the entire real conversation is cached, and only
-        # fake_asst + fake_user₂ (~21 tokens) are uncached input.
+        # The stable prefix exactly matches what the next real request
+        # will see, so no cache creation is wasted.
         msgs = list(state["messages"])
+
+        # Walk backwards to find the second-to-last assistant message.
+        asst_indices = [
+            i for i, m in enumerate(msgs)
+            if getattr(m, "role", None) == "assistant"
+        ]
+        if len(asst_indices) >= 2:
+            msgs = msgs[: asst_indices[-2] + 1]
+        else:
+            preset_n = self._preset_count()
+            msgs = msgs[:preset_n] if preset_n > 0 else []
+
         KEEPALIVE = (
             "[System: This is an automatic cache keepalive message. "
             "Reply with 'OK' verbatim.]"
