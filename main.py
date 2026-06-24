@@ -82,7 +82,7 @@ class CachePulsePlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_any_message(self, event: AstrMessageEvent):
-        """Record real user activity and reset pulse counter."""
+        """Record real user activity (tries reset deferred to on_agent_done)."""
         if not self._enabled():
             return
         umo = event.unified_msg_origin
@@ -90,9 +90,8 @@ class CachePulsePlugin(Star):
         state = self.sessions.get(umo)
         if state:
             state["last_user_at"] = now
-            state["tries"] = 0
             if self._debug():
-                logger.debug("[🔄 Cache Pulse] user activity reset umo=%s", umo)
+                logger.debug("[🔄 Cache Pulse] user activity umo=%s", umo)
         else:
             # Skeleton entry — snapshot will be filled by on_agent_done
             self.sessions[umo] = {
@@ -247,7 +246,8 @@ class CachePulsePlugin(Star):
             "[System: This is an automatic cache keepalive message. "
             "Reply with 'OK' verbatim.]"
         )
-        msgs.append({"role": "assistant", "content": "OK"})
+        msgs.append({"role": "assistant", "content":
+            "[Entering cache keepalive mode.]"})
         msgs.append({"role": "user", "content": KEEPALIVE})
         msgs.append({"role": "assistant", "content": "OK"})
         msgs.append({"role": "user", "content": KEEPALIVE})
