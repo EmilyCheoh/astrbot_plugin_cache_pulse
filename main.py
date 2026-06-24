@@ -216,29 +216,27 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Trim to the second-to-last assistant message to discard the
-        # volatile tail (last user message may be modified by cleanup
-        # plugins that strip injected XML).  Then append three fake
-        # messages so the cache_control breakpoint (placed on the
-        # second-to-last user message by the patched anthropic_source)
-        # lands on static keepalive text rather than a real message.
+        # Trim to the second-to-last *user* message so the pulse's
+        # cached prefix aligns exactly with the real request's cache
+        # breakpoint (which the patched anthropic_source places on the
+        # second-to-last user message).  Then append a fake assistant
+        # reply and a fake user turn to satisfy API format.
         #
-        #   [...stable prefix..., second_to_last_asst]
-        #     + fake_user₁  ← breakpoint lands here
-        #     + fake_asst
-        #     + fake_user₂  ← uncached (~33 tokens total with fake_asst)
+        #   [...stable prefix..., second_to_last_user]  ← breakpoint
+        #     + fake_asst "OK"   ┐
+        #     + fake_user KEEP   ┘ uncached input (~22 tokens)
         #
-        # The stable prefix exactly matches what the next real request
-        # will see, so no cache creation is wasted.
+        # Because the breakpoint position matches the real request's,
+        # the pulse refreshes the existing cache with zero wasted
+        # cache creation.
         msgs = list(state["messages"])
 
-        # Walk backwards to find the second-to-last assistant message.
-        asst_indices = [
+        user_indices = [
             i for i, m in enumerate(msgs)
-            if getattr(m, "role", None) == "assistant"
+            if getattr(m, "role", None) == "user"
         ]
-        if len(asst_indices) >= 2:
-            msgs = msgs[: asst_indices[-2] + 1]
+        if len(user_indices) >= 2:
+            msgs = msgs[: user_indices[-2] + 1]
         else:
             preset_n = self._preset_count()
             msgs = msgs[:preset_n] if preset_n > 0 else []
@@ -247,7 +245,6 @@ class CachePulsePlugin(Star):
             "[System: This is an automatic cache keepalive message. "
             "Reply with 'OK' verbatim.]"
         )
-        msgs.append({"role": "user", "content": KEEPALIVE})
         msgs.append({"role": "assistant", "content": "OK"})
         msgs.append({"role": "user", "content": KEEPALIVE})
 
