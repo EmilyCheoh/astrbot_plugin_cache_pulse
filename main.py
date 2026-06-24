@@ -216,19 +216,21 @@ class CachePulsePlugin(Star):
         """Send a single cache-warming pulse via llm_generate."""
         provider_id = state["provider_id"]
 
-        # Trim to the second-to-last *user* message so the pulse's
-        # cached prefix aligns exactly with the real request's cache
-        # breakpoint (which the patched anthropic_source places on the
-        # second-to-last user message).  Then append a fake assistant
-        # reply and a fake user turn to satisfy API format.
+        # Trim to the second-to-last *user* message to align closely
+        # with the real request's cache breakpoint (which the patched
+        # anthropic_source places on the second-to-last user message).
+        # Then append two pairs of fake (asst "OK", user KEEPALIVE):
         #
-        #   [...stable prefix..., second_to_last_user]  ← breakpoint
-        #     + fake_asst "OK"   ┐
-        #     + fake_user KEEP   ┘ uncached input (~22 tokens)
+        #   [...stable prefix..., second_to_last_user]
+        #     + fake_asst "OK"                          ┐ ~22 tokens
+        #     + fake_user₁ KEEPALIVE  ← breakpoint      ┘ cache creation
+        #     + fake_asst "OK"        ┐
+        #     + fake_user₂ KEEPALIVE  ┘ uncached input ~22 tokens
         #
-        # Because the breakpoint position matches the real request's,
-        # the pulse refreshes the existing cache with zero wasted
-        # cache creation.
+        # The first (KEEPALIVE → OK) pair provides an in-context
+        # example so the model responds with just "OK" (~4 tokens).
+        # Cache creation waste: only ~22 tokens per batch (the gap
+        # between the real breakpoint and the pulse's fake_user₁).
         msgs = list(state["messages"])
 
         user_indices = [
@@ -245,6 +247,8 @@ class CachePulsePlugin(Star):
             "[System: This is an automatic cache keepalive message. "
             "Reply with 'OK' verbatim.]"
         )
+        msgs.append({"role": "assistant", "content": "OK"})
+        msgs.append({"role": "user", "content": KEEPALIVE})
         msgs.append({"role": "assistant", "content": "OK"})
         msgs.append({"role": "user", "content": KEEPALIVE})
 
