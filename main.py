@@ -72,11 +72,7 @@ class CachePulsePlugin(Star):
         adapter = str(cfg.get("type", "") or "").lower()
         name = str(cfg.get("id", "") or provider_id).lower()
         model = str(cfg.get("model", "") or "").lower()
-        return (
-            "anthropic" in adapter
-            or "anthropic" in name
-            or "claude" in model
-        )
+        return "anthropic" in adapter or "anthropic" in name
 
     # ── event listeners ─────────────────────────────────────────────
 
