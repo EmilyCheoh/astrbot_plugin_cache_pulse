@@ -33,5 +33,11 @@
     "hint": "Log cache pulse details to AstrBot log",
     "type": "bool",
     "default": true
+  },
+  "notify_on_expire": {
+    "description": "缓存即将过期时发送提醒",
+    "hint": "Send a message when max pulse tries are exhausted and the cache is about to expire",
+    "type": "bool",
+    "default": true
   }
 }

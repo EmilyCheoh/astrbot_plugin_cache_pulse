@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 
 
@@ -54,6 +54,9 @@ class CachePulsePlugin(Star):
 
     def _debug(self) -> bool:
         return bool(self.config.get("debug_log", True))
+
+    def _notify_on_expire(self) -> bool:
+        return bool(self.config.get("notify_on_expire", True))
 
     def _preset_count(self) -> int:
         return int(self.config.get("preset_message_count", 2))
@@ -181,6 +184,18 @@ class CachePulsePlugin(Star):
                             self._max_tries(),
                         )
                         state["_max_logged"] = True
+                        # Nudge Felis Abyssalis before the cache goes cold
+                        if self._notify_on_expire():
+                            try:
+                                chain = MessageChain().message(
+                                    "‼️ Cache is expiring soon. 💸"
+                                )
+                                await self.context.send_message(umo, chain)
+                            except Exception as exc:
+                                logger.warning(
+                                    "[🔄 Cache Pulse] notify failed, err=%s",
+                                    umo, exc,
+                                )
                     continue
                 # Check if enough idle time has passed since last LLM activity
                 last_activity = max(
