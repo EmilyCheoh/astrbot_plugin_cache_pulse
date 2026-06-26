@@ -89,7 +89,6 @@ class CachePulsePlugin(Star):
         state = self.sessions.get(umo)
         if state:
             state["last_user_at"] = now
-            state["last_pulse_at"] = now
             state["tries"] = 0
             if self._debug():
                 logger.debug("[🔄 Cache Pulse] user activity reset umo=%s", umo)
