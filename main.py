@@ -77,6 +77,11 @@ class CachePulsePlugin(Star):
         model = str(cfg.get("model", "") or "").lower()
         return "anthropic" in adapter or "anthropic" in name
 
+    def _is_claude_model(self, model: Any) -> bool:
+        """Return True only if the model string looks like a Claude model."""
+        model_name = str(model or "").lower()
+        return "claude" in model_name
+
     # ── event listeners ─────────────────────────────────────────────
 
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -118,16 +123,25 @@ class CachePulsePlugin(Star):
                 logger.warning("[🔄 Cache Pulse] could not resolve provider for umo=%s", umo)
             return
 
-        if not self._is_anthropic_provider(provider_id):
-            if self._debug():
-                logger.debug("[🔄 Cache Pulse] skip non-Anthropic provider=%s", provider_id)
-            return
-
         # Read exposed metadata from runner patch
         extra = getattr(getattr(run_context, "context", None), "extra", None) or {}
         tools = extra.get("cache_pulse_func_tool")
         model = extra.get("cache_pulse_model")
         session_id = extra.get("cache_pulse_session_id")
+
+        # Only pulse for the exact safe combination:
+        #   Claude model + Anthropic-format provider
+        #
+        # Important:
+        #   Do NOT fallback to provider_config["model"] here.
+        #   If the current run did not expose a model, stay silent.
+        #   This avoids mixing WebUI DS sessions with the main QQ Claude provider.
+        if not (
+            self._is_anthropic_provider(provider_id)
+            and self._is_claude_model(model)
+        ):
+            self.sessions.pop(umo, None)
+            return
 
         # Deep-copy messages so later mutations don't affect our snapshot
         try:
@@ -193,7 +207,7 @@ class CachePulsePlugin(Star):
                             except Exception as exc:
                                 logger.warning(
                                     "[🔄 Cache Pulse] notify failed, err=%s",
-                                    umo, exc,
+                                    exc,
                                 )
                     continue
                 # Check if enough idle time has passed since last LLM activity
