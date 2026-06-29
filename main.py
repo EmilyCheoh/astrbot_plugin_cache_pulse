@@ -61,6 +61,18 @@ class CachePulsePlugin(Star):
     def _preset_count(self) -> int:
         return int(self.config.get("preset_message_count", 2))
 
+    def _command_prefixes(self) -> list[str]:
+        """Return list of known command prefixes from config."""
+        raw = str(self.config.get("command_prefixes", ""))
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    def _is_command(self, text: str) -> bool:
+        """Return True if text starts with a known command prefix (with or without /)."""
+        for prefix in self._command_prefixes():
+            if text.startswith(prefix) or text.startswith("/" + prefix):
+                return True
+        return False
+
     # ── provider detection ──────────────────────────────────────────
 
     def _is_anthropic_provider(self, provider_id: str) -> bool:
@@ -90,11 +102,28 @@ class CachePulsePlugin(Star):
         if not self._enabled():
             return
         umo = event.unified_msg_origin
+
+        # Conversation reset commands → discard stale snapshot
+        text = (event.message_str or "").strip()
+        if text in ("new", "/new") or text.startswith(("switch ", "/switch ")):
+            self.sessions.pop(umo, None)
+            if self._debug():
+                logger.debug("[🔄 Cache Pulse] session cleared by '%s'", text)
+            return
+
         now = time.monotonic()
         state = self.sessions.get(umo)
         if state:
             state["last_user_at"] = now
-            state["tries"] = 0
+            # After max tries (cache expired), known commands should not
+            # restart the pulse cycle — she might just be running TTS or
+            # other plugins without intending to chat yet.
+            if state.get("tries", 0) >= self._max_tries() and self._is_command(text):
+                if self._debug():
+                    logger.debug("[🔄 Cache Pulse] command after expiry, skip reset")
+            else:
+                state["tries"] = 0
+                state["_max_logged"] = False
             if self._debug():
                 logger.debug("[🔄 Cache Pulse] user activity reset umo=%s", umo)
         else:

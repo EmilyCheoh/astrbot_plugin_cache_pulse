@@ -39,5 +39,11 @@
     "hint": "Send a message when max pulse tries are exhausted and the cache is about to expire",
     "type": "bool",
     "default": true
+  },
+  "command_prefixes": {
+    "description": "插件/指令前缀（逗号分隔）",
+    "hint": "Comma-separated command prefixes (e.g. 'provider, ls, tts_say, image_gen, clearall, removeall'). Messages starting with these (with or without /) will not restart pulse after cache expiry.",
+    "type": "string",
+    "default": "provider, ls, tts_say, image_gen"
   }
 }
