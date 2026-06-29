@@ -129,17 +129,18 @@ class CachePulsePlugin(Star):
         model = extra.get("cache_pulse_model")
         session_id = extra.get("cache_pulse_session_id")
 
-        # Only pulse for the exact safe combination:
-        #   Claude model + Anthropic-format provider
+        # Only pulse for Claude on an Anthropic-format provider.
         #
-        # Important:
-        #   Do NOT fallback to provider_config["model"] here.
-        #   If the current run did not expose a model, stay silent.
-        #   This avoids mixing WebUI DS sessions with the main QQ Claude provider.
-        if not (
-            self._is_anthropic_provider(provider_id)
-            and self._is_claude_model(model)
-        ):
+        # 1. Provider must be Anthropic-format — otherwise skip.
+        # 2. If the runner patch exposed a model name, verify it's Claude.
+        #    If model is None (patch didn't expose it), allow it through —
+        #    DS sessions always expose their model in extra, so a missing
+        #    model on an Anthropic provider reliably indicates Claude on QQ.
+        if not self._is_anthropic_provider(provider_id):
+            self.sessions.pop(umo, None)
+            return
+
+        if model is not None and not self._is_claude_model(model):
             self.sessions.pop(umo, None)
             return
 
