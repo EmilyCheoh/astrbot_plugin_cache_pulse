@@ -212,13 +212,12 @@ class CachePulsePlugin(Star):
             "inflight": False,
         }
 
-        if self._debug():
-            logger.info(
-                "[🔄 Cache Pulse] snapshot saved, %d msgs, generation %.1fs, "
-                "next pulse in ~%.0fs",
-                len(messages), generation_duration,
-                max(0, self._interval() - generation_duration),
-            )
+        logger.info(
+            "[🔄 Cache Pulse] snapshot saved, %d msgs, generation %.1fs, "
+            "next pulse in ~%.0fs",
+            len(messages), generation_duration,
+            max(0, self._interval() - generation_duration),
+        )
 
     # ── background pulse loop ───────────────────────────────────────
 
