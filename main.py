@@ -6,6 +6,18 @@ silently pings the Anthropic API with max_tokens=0 to refresh the cache
 without generating any text, sending any QQ message, or touching the
 conversation history.
 
+Timing model (critical for correctness):
+  Anthropic's cache TTL (300s) counts from *prefill completion* — i.e.
+  approximately when the request is sent.  For high-reasoning Opus
+  responses that take 60-90s to generate, measuring idle time from
+  *response end* would silently consume 60-90s of the 300s budget,
+  causing the cache to expire before the next pulse.
+
+  We therefore track `last_cache_write_at` — the estimated time when
+  the cache was actually written (≈ user message arrival time for real
+  turns, ≈ pulse request dispatch time for keepalive turns) — and
+  measure elapsed time from that point.
+
 Requires a small patch to:
   - astr_agent_context.py        (extra: dict[str, Any])
   - tool_loop_agent_runner.py    (expose func_tool/model/session_id in extra)
@@ -130,8 +142,7 @@ class CachePulsePlugin(Star):
             # Skeleton entry — snapshot will be filled by on_agent_done
             self.sessions[umo] = {
                 "last_user_at": now,
-                "last_llm_done_at": 0.0,
-                "last_pulse_at": 0.0,
+                "last_cache_write_at": 0.0,
                 "tries": 0,
                 "inflight": False,
             }
@@ -182,6 +193,13 @@ class CachePulsePlugin(Star):
             return
 
         now = time.monotonic()
+        # Cache was written at prefill ≈ when the request was sent ≈
+        # shortly after the user message arrived.  Grab the timestamp
+        # that on_any_message recorded before the LLM started running.
+        existing = self.sessions.get(umo, {})
+        cache_write_at = existing.get("last_user_at", now)
+        generation_duration = now - cache_write_at
+
         self.sessions[umo] = {
             "provider_id": provider_id,
             "messages": messages,
@@ -189,16 +207,17 @@ class CachePulsePlugin(Star):
             "model": model,
             "session_id": session_id,
             "last_user_at": now,
-            "last_llm_done_at": now,
-            "last_pulse_at": 0.0,
+            "last_cache_write_at": cache_write_at,
             "tries": 0,
             "inflight": False,
         }
 
         if self._debug():
             logger.info(
-                "[🔄 Cache Pulse] snapshot saved, %d messages captured",
-                len(messages),
+                "[🔄 Cache Pulse] snapshot saved, %d msgs, generation %.1fs, "
+                "next pulse in ~%.0fs",
+                len(messages), generation_duration,
+                max(0, self._interval() - generation_duration),
             )
 
     # ── background pulse loop ───────────────────────────────────────
@@ -240,30 +259,31 @@ class CachePulsePlugin(Star):
                                     exc,
                                 )
                     continue
-                # Check if enough idle time has passed since last LLM activity
-                last_activity = max(
-                    float(state.get("last_llm_done_at") or 0),
-                    float(state.get("last_pulse_at") or 0),
-                )
-                if last_activity <= 0:
+                # Check elapsed time since cache was actually written
+                # (not since response ended — generation time counts
+                # against the 300s TTL).
+                last_cache = float(state.get("last_cache_write_at") or 0)
+                if last_cache <= 0:
                     continue
-                idle = now - last_activity
-                if idle < self._interval():
+                elapsed = now - last_cache
+                if elapsed < self._interval():
                     continue
 
-                # Fire pulse
+                # Fire pulse — record dispatch time as cache write time
                 state["inflight"] = True
+                pulse_start = time.monotonic()
                 try:
                     await self._do_pulse(umo, state)
                     state["tries"] = state.get("tries", 0) + 1
-                    state["last_pulse_at"] = time.monotonic()
+                    state["last_cache_write_at"] = pulse_start
                 except Exception as exc:
                     logger.warning(
                         "[🔄 Cache Pulse] pulse failed umo=%s err=%s",
                         umo, exc, exc_info=True,
                     )
                     state["tries"] = state.get("tries", 0) + 1
-                    state["last_pulse_at"] = time.monotonic()
+                    # Don't update last_cache_write_at on failure —
+                    # next check will retry immediately.
                 finally:
                     state["inflight"] = False
 
