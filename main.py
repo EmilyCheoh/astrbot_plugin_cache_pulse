@@ -35,13 +35,21 @@ from astrbot.api.star import Context, Star, register
 
 
 PLUGIN_NAME = "astrbot_plugin_cache_pulse"
+PAUSE_COMMANDS = {
+    "pausecache",
+    "stopcache",
+    "cachepause",
+    "cachestop",
+    "pause_cache",
+    "stop_cache",
+}
 
 
 @register(
     PLUGIN_NAME,
     "Felis Abyssalis & Noir & Abyss AI",
     "Keep Anthropic prompt cache warm for active sessions.",
-    "0.1.0",
+    "0.2.0",
 )
 class CachePulsePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -85,6 +93,10 @@ class CachePulsePlugin(Star):
                 return True
         return False
 
+    def _is_pause_command(self, text: str) -> bool:
+        """Return True for an exact Cache Pulse pause command."""
+        return text.removeprefix("/") in PAUSE_COMMANDS
+
     # ── provider detection ──────────────────────────────────────────
 
     def _is_anthropic_provider(self, provider_id: str) -> bool:
@@ -115,9 +127,13 @@ class CachePulsePlugin(Star):
             return
         umo = event.unified_msg_origin
 
-        # Conversation reset commands → discard stale snapshot
+        # Conversation reset or explicit pause commands → discard snapshot
         text = (event.message_str or "").strip()
-        if text in ("new", "/new") or text.startswith(("switch ", "/switch ")):
+        if (
+            text in ("new", "/new")
+            or text.startswith(("switch ", "/switch "))
+            or self._is_pause_command(text)
+        ):
             self.sessions.pop(umo, None)
             if self._debug():
                 logger.debug("[🔄 Cache Pulse] session cleared by '%s'", text)
@@ -146,6 +162,28 @@ class CachePulsePlugin(Star):
                 "tries": 0,
                 "inflight": False,
             }
+
+    @filter.command(
+        "pausecache",
+        alias={
+            "stopcache",
+            "cachepause",
+            "cachestop",
+            "pause_cache",
+            "stop_cache",
+        },
+    )
+    async def pause_cache(self, event: AstrMessageEvent):
+        """Pause Cache Pulse for this session until the next LLM response."""
+        umo = event.unified_msg_origin
+        self.sessions.pop(umo, None)
+        logger.info(
+            "[🔄 Cache Pulse] paused by command; will resume after next LLM response"
+        )
+        yield event.plain_result(
+            "⏸️ Cache Pulse paused until the next LLM response."
+        )
+        event.stop_event()
 
     @filter.on_agent_done()
     async def on_agent_done(self, event: AstrMessageEvent, run_context, response):
