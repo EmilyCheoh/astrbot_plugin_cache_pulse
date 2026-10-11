@@ -34,6 +34,10 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 
 
+class EmptyPulseOutputError(RuntimeError):
+    """Raised when a pulse completes without producing output tokens."""
+
+
 PLUGIN_NAME = "astrbot_plugin_cache_pulse"
 PAUSE_COMMANDS = {
     "pausecache",
@@ -161,6 +165,7 @@ class CachePulsePlugin(Star):
                 "last_cache_write_at": 0.0,
                 "tries": 0,
                 "inflight": False,
+                "paused_due_error": False,
             }
 
     @filter.command(
@@ -248,6 +253,7 @@ class CachePulsePlugin(Star):
             "last_cache_write_at": cache_write_at,
             "tries": 0,
             "inflight": False,
+            "paused_due_error": False,
         }
 
         logger.info(
@@ -269,6 +275,8 @@ class CachePulsePlugin(Star):
             now = time.monotonic()
             for umo, state in list(self.sessions.items()):
                 if state.get("inflight"):
+                    continue
+                if state.get("paused_due_error"):
                     continue
                 # Need a full snapshot to pulse
                 provider_id = state.get("provider_id")
@@ -311,18 +319,48 @@ class CachePulsePlugin(Star):
                 pulse_start = time.monotonic()
                 try:
                     await self._do_pulse(umo, state)
-                    state["tries"] = state.get("tries", 0) + 1
-                    state["last_cache_write_at"] = pulse_start
+                except EmptyPulseOutputError:
+                    logger.warning(
+                        "[🔄 Cache Pulse] empty pulse output umo=%s", umo,
+                    )
+                    await self._pause_after_failure(
+                        umo, state, "pulse 没有产生输出。",
+                    )
                 except Exception as exc:
                     logger.warning(
                         "[🔄 Cache Pulse] pulse failed umo=%s err=%s",
                         umo, exc, exc_info=True,
                     )
+                    await self._pause_after_failure(
+                        umo, state, "API 请求失败。",
+                    )
+                else:
                     state["tries"] = state.get("tries", 0) + 1
-                    # Don't update last_cache_write_at on failure —
-                    # next check will retry immediately.
+                    state["last_cache_write_at"] = pulse_start
                 finally:
                     state["inflight"] = False
+
+    async def _pause_after_failure(
+        self,
+        umo: str,
+        state: dict[str, Any],
+        reason: str,
+    ) -> None:
+        """Mark session as paused and send a one-time notification."""
+        state["paused_due_error"] = True
+
+        try:
+            chain = MessageChain().message(
+                f"\u26a0\ufe0f Cache Pulse \u5df2\u6682\u505c\uff1a"
+                f"{reason}\n"
+                "\u4e0b\u4e00\u6b21\u6b63\u5e38\u56de\u590d\u540e\u81ea\u52a8\u6062\u590d\u3002"
+            )
+            await self.context.send_message(umo, chain)
+        except Exception as notify_exc:
+            logger.warning(
+                "[🔄 Cache Pulse] failure notify failed, err=%s",
+                notify_exc,
+            )
 
     async def _do_pulse(self, umo: str, state: dict[str, Any]):
         """Send a single cache-warming pulse via llm_generate."""
@@ -374,8 +412,15 @@ class CachePulsePlugin(Star):
             cache_pulse=True,
         )
 
+        usage = getattr(resp, "usage", None)
+        output_tokens = int(getattr(usage, "output", 0) or 0)
+
+        if output_tokens <= 0:
+            raise EmptyPulseOutputError(
+                f"pulse completed with zero output tokens (usage={usage})"
+            )
+
         if self._debug():
-            usage = getattr(resp, "usage", None)
             logger.info(
                 "[🔄 Cache Pulse] pulse ok (try %d) usage = %s",
                 state.get("tries", 0) + 1, usage,
