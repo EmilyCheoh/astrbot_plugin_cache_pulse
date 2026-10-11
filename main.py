@@ -2,7 +2,7 @@
 
 When Felis Abyssalis pauses between messages, Anthropic's 5-minute cache
 TTL can expire and force a full re-write on the next turn.  This plugin
-silently pings the Anthropic API with max_tokens=0 to refresh the cache
+silently pings the Anthropic API to refresh the cache
 without generating any text, sending any QQ message, or touching the
 conversation history.
 
@@ -194,6 +194,18 @@ class CachePulsePlugin(Star):
     async def on_agent_done(self, event: AstrMessageEvent, run_context, response):
         """Snapshot the completed LLM context for future pulse replay."""
         if not self._enabled():
+            return
+
+        # AstrBot fires on_agent_done with role="err" on LLM failures.
+        # Only a successful assistant response should save a snapshot
+        # and clear paused_due_error.
+        if getattr(response, "role", None) != "assistant":
+            if self._debug():
+                logger.info(
+                    "[🔄 Cache Pulse] non-assistant response (role=%s); "
+                    "keeping pulse state unchanged",
+                    getattr(response, "role", None),
+                )
             return
 
         umo = event.unified_msg_origin

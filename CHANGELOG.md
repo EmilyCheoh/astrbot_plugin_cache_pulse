@@ -22,6 +22,9 @@ potentially extending rate-limit bans.
   `last_cache_write_at` — no silent timer resets on failure.
 - `on_agent_done` clears `paused_due_error` on next successful real
   response, automatically resuming the pulse cycle.
+- `on_agent_done` now checks `response.role == "assistant"` before
+  saving a snapshot — error responses (`role="err"`) no longer
+  incorrectly clear the pause state. (Credit: Noir)
 
 ## 0.1.1 — 2026-08-07
 
